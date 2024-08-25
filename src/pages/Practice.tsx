@@ -1,16 +1,74 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuthState } from "react-firebase-hooks/auth";
+import { useCollectionData } from "react-firebase-hooks/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
+import {
+  collection,
+  query,
+  where,
+  orderBy,
+  limit,
+  addDoc,
+  updateDoc,
+  doc,
+} from "firebase/firestore";
+import { auth, firestore } from "../services/firebase"; // Adjust this import based on your Firebase setup
+import { GeneratedText } from "../types/Text";
 
 const Practice: React.FC = () => {
-  const [text, setText] = useState<string>("");
-  const [selectedWords, setSelectedWords] = useState<string[]>([]);
+  const [user, loading, error] = useAuthState(auth);
   const navigate = useNavigate();
 
-  const handleStartPractice = () => {
-    // In a real application, you would fetch the text from your backend
-    const sampleText =
-      "IELTS is a standardized test designed to measure the language proficiency of people who want to study or work in environments where English is used as a language of communication. It covers four language skills – Listening, Reading, Writing, and Speaking. The IELTS test is jointly managed by the British Council, IDP: IELTS Australia and Cambridge Assessment English. It was established in 1989 and has since become one of the most widely recognized English language tests globally. IELTS is accepted by most Australian, British, Canadian, Irish, New Zealand and South African academic institutions, over 3,000 academic institutions in the United States, and various professional organizations across the world. It is also a requirement for immigration to some countries such as Australia, New Zealand and Canada. The test is designed to assess the language ability of candidates who need to study or work where English is the language of communication. There are two versions of the IELTS: Academic and General Training. The Academic version is for test takers who want to study at higher education or professional registration level, while the General Training version is for those who want to migrate to an English-speaking country or train or study at below degree level.";
-    setText(sampleText);
+  const [currentText, setCurrentText] = useState<GeneratedText | null>(null);
+  const [selectedWords, setSelectedWords] = useState<string[]>([]);
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  // Query for the most recent uncompleted generated text
+  const generatedTextsQuery = query(
+    collection(firestore, `accounts/${user?.uid}/generatedText`),
+    where("completed", "==", false),
+    orderBy("createdAt", "desc"),
+    limit(1)
+  );
+
+  const [generatedTexts, generatedTextsLoading] =
+    useCollectionData(generatedTextsQuery);
+
+  useEffect(() => {
+    if (generatedTexts && generatedTexts.length > 0) {
+      setCurrentText(generatedTexts[0] as GeneratedText);
+    }
+  }, [generatedTexts]);
+
+  const handleStartPractice = async () => {
+    if (!user) return;
+
+    setIsGenerating(true);
+    const functions = getFunctions();
+    const generatePracticeText = httpsCallable<
+      {},
+      { generatedText: string; generatedTextId: string }
+    >(functions, "generatePracticeText");
+
+    try {
+      const result = await generatePracticeText();
+      const newText: GeneratedText = {
+        id: result.data.generatedTextId,
+        text: result.data.generatedText,
+        uid: user.uid,
+        createdAt: Date.now(),
+        completed: false,
+        unkown_words: [],
+        suggested_words: [],
+      };
+      setCurrentText(newText);
+    } catch (error) {
+      console.error("Error generating practice text:", error);
+      // Handle error (show error message to user)
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleWordClick = (word: string) => {
@@ -19,27 +77,52 @@ const Practice: React.FC = () => {
     );
   };
 
-  const handleSubmitScore = () => {
-    navigate("/results", { state: { selectedWords } });
+  const handleSubmit = async () => {
+    if (!currentText || !user) return;
+
+    try {
+      await updateDoc(
+        doc(firestore, `accounts/${user.uid}/generatedText/${currentText.id}`),
+        {
+          completed: true,
+          unkown_words: selectedWords,
+        }
+      );
+
+      // Here you would typically call another cloud function to determine IELTS level
+      // and update the user's score. For now, we'll just navigate to results.
+      navigate("/results", { state: { selectedWords } });
+    } catch (error) {
+      console.error("Error submitting practice:", error);
+      // Handle error
+    }
   };
+
+  if (loading || generatedTextsLoading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error.message}</div>;
+  if (!user) {
+    navigate("/login");
+    return null;
+  }
 
   return (
     <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-purple-600 to-blue-500 p-4">
-      <div className="bg-white bg-opacity-90 p-8 rounded-xl shadow-2xl w-full max-w-4xl flex flex-col">
+      <div className="bg-white bg-opacity-90 p-8 rounded-xl shadow-2xl w-full max-w-4xl flex flex-col h-[80vh]">
         <h1 className="text-3xl font-bold mb-6 text-center text-gray-800">
           雅思练习
         </h1>
-        {!text ? (
+        {!currentText ? (
           <button
             onClick={handleStartPractice}
-            className="w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+            disabled={isGenerating}
+            className="w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
           >
-            开始练习
+            {isGenerating ? "生成中..." : "开始练习"}
           </button>
         ) : (
           <div className="flex flex-col flex-grow">
             <div className="mb-4 p-4 border border-gray-300 rounded-md bg-gray-50 overflow-y-auto flex-grow">
-              {text.split(" ").map((word, index) => (
+              {currentText.text.split(" ").map((word, index) => (
                 <span
                   key={index}
                   onClick={() => handleWordClick(word)}
@@ -55,7 +138,7 @@ const Practice: React.FC = () => {
               点击您不理解的单词。它们将被高亮显示。
             </p>
             <button
-              onClick={handleSubmitScore}
+              onClick={handleSubmit}
               className="w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
             >
               提交评分
