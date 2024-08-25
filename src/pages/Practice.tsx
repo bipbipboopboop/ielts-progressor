@@ -21,23 +21,23 @@ const Practice: React.FC = () => {
   const processSelectedWords = httpsCallable(functions, "processSelectedWords");
 
   // Query for the most recent uncompleted generated text
+  console.log({ user });
   const generatedTextsQuery = query(
     collection(firestore, `accounts/${user?.uid}/generatedText`),
     where("completed", "==", false),
-    orderBy("createdAt", "desc"),
+    orderBy("createdAt", "asc"),
     limit(1)
   );
 
   const [generatedTexts, generatedTextsLoading] =
     useCollectionData(generatedTextsQuery);
+  console.log({ generatedTexts });
 
   useEffect(() => {
     if (generatedTexts && generatedTexts.length > 0) {
       setCurrentText(generatedTexts[0] as GeneratedText);
     }
-  }, [generatedTexts]);
-
-  console.log({ generatedTexts });
+  }, [generatedTextsLoading]);
 
   const handleStartPractice = async () => {
     if (!user) return;
@@ -45,6 +45,7 @@ const Practice: React.FC = () => {
     setIsGenerating(true);
     try {
       const result = await generatePracticeText();
+      console.log({ result });
       const newText = result.data as GeneratedText;
       setCurrentText(newText);
     } catch (error) {

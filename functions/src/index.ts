@@ -181,11 +181,7 @@ export const generatePracticeText = functions.https.onCall(
       // Set the data using the document reference
       await docRef.set(generatedTextData);
 
-      return {
-        success: true,
-        generatedTextId: docRef.id,
-        generatedText: generatedText,
-      };
+      return generatedTextData;
     } catch (error) {
       console.error("Error generating practice text:", error);
       throw new functions.https.HttpsError(
