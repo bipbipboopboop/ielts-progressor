@@ -2,6 +2,7 @@ import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import { Account } from "./types/Account";
 import axios from "axios";
+import * as querystring from "querystring";
 
 import { GeneratedText } from "./types/Text";
 
@@ -44,23 +45,32 @@ const GENERATION_URL =
   "https://us-south.ml.cloud.ibm.com/ml/v1/text/generation?version=2023-05-29";
 
 async function getAccessToken(apiKey: string): Promise<string> {
-  const data = {
+  const data = querystring.stringify({
     grant_type: "urn:ibm:params:oauth:grant-type:apikey",
     apikey: apiKey,
+  });
+
+  const config = {
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
   };
 
   try {
-    const response = await axios.post(TOKEN_URL, data);
+    const response = await axios.post(TOKEN_URL, data, config);
     return response.data.access_token;
   } catch (error) {
     console.error("Failed to get access token:", error);
+    if (axios.isAxiosError(error) && error.response) {
+      console.error("Response data:", error.response.data);
+      console.error("Response status:", error.response.status);
+    }
     throw new functions.https.HttpsError(
       "internal",
       "Failed to get access token"
     );
   }
 }
-
 async function generateText(
   prompt: string,
   accessToken: string
@@ -105,6 +115,9 @@ async function generateText(
 
   try {
     const response = await axios.post(GENERATION_URL, body, { headers });
+    if (response.status !== 200) {
+      throw new Error(`Non-200 response: ${response.status}`);
+    }
     return response.data.results[0].generated_text;
   } catch (error) {
     console.error("Failed to generate text:", error);
@@ -155,7 +168,7 @@ export const generatePracticeText = functions.https.onCall(
         .doc();
 
       const generatedTextData: GeneratedText = {
-        id: docRef.id, // Use the Firestore-generated ID
+        id: docRef.id,
         text: generatedText,
         uid: uid,
         createdAt: Date.now(),

@@ -25,7 +25,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth: Auth = getAuth(app);
 const firestore: Firestore = getFirestore(app);
-const functions: Functions = getFunctions(app, "asia-east2");
+const functions: Functions = getFunctions(app);
 const database = getDatabase(app);
 
 if (process.env.NODE_ENV === "development") {
