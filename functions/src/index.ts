@@ -171,6 +171,7 @@ export const generatePracticeText = functions.https.onCall(
         id: docRef.id,
         text: generatedText,
         uid: uid,
+        score: currentLevel,
         createdAt: Date.now(),
         completed: false,
         suggested_words: [],
@@ -194,3 +195,130 @@ export const generatePracticeText = functions.https.onCall(
     }
   }
 );
+
+async function determineIELTSLevel(
+  difficultWords: string[],
+  accessToken: string
+): Promise<number> {
+  const body = {
+    input: `Estimate the IELTS score of this person, provide only the numerical value (e.g., 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0. 6.5, 7.0, 7.5, 8.0, 8.5, 9.0) and NOTHING else based on the following words which the found. DO NOT RETURN ANYTHING ELSE.
+
+    Input: difficult_words = [${difficultWords.join(", ")}]
+    `,
+    parameters: {
+      decoding_method: "sample",
+      max_new_tokens: 200,
+      temperature: 0.7,
+      top_k: 50,
+      top_p: 1,
+      repetition_penalty: 1,
+    },
+    model_id: "google/flan-t5-xl",
+    project_id: "761d2bec-ffdd-47fc-a86f-6f09b649cb22",
+    moderations: {
+      hap: {
+        input: {
+          enabled: true,
+          threshold: 0.5,
+          mask: {
+            remove_entity_value: true,
+          },
+        },
+        output: {
+          enabled: true,
+          threshold: 0.5,
+          mask: {
+            remove_entity_value: true,
+          },
+        },
+      },
+    },
+  };
+
+  const headers = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${accessToken}`,
+  };
+
+  try {
+    const response = await axios.post(GENERATION_URL, body, { headers });
+    const estimatedLevel = parseFloat(response.data.results[0].generated_text);
+    if (isNaN(estimatedLevel)) {
+      throw new Error("Failed to parse estimated IELTS level");
+    }
+    return estimatedLevel;
+  } catch (error) {
+    console.error("Failed to determine IELTS level:", error);
+    throw new functions.https.HttpsError(
+      "internal",
+      "Failed to determine IELTS level"
+    );
+  }
+}
+
+export const processSelectedWords = functions.https.onCall(
+  async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "User must be authenticated"
+      );
+    }
+
+    const { selectedWords, generatedTextId } = data;
+    const uid = context.auth.uid;
+
+    try {
+      const accessToken = await getAccessToken(API_KEY);
+      const estimatedLevel = await determineIELTSLevel(
+        selectedWords,
+        accessToken
+      );
+
+      // Update user's IELTS score
+      await admin.firestore().collection("accounts").doc(uid).update({
+        score: estimatedLevel,
+      });
+
+      // Update the generatedText document
+      await admin
+        .firestore()
+        .collection("accounts")
+        .doc(uid)
+        .collection("generatedText")
+        .doc(generatedTextId)
+        .update({
+          completed: true,
+          score: estimatedLevel,
+          unkown_words: selectedWords,
+        });
+
+      // Fetch word meanings (you'll need to implement this part based on your word database)
+      const wordMeanings = await fetchWordMeanings(selectedWords);
+
+      return {
+        success: true,
+        newScore: estimatedLevel,
+        unknownWords: wordMeanings,
+      };
+    } catch (error) {
+      console.error("Error processing selected words:", error);
+      throw new functions.https.HttpsError(
+        "internal",
+        "Failed to process selected words"
+      );
+    }
+  }
+);
+
+// You'll need to implement this function based on your word database
+async function fetchWordMeanings(
+  words: string[]
+): Promise<Record<string, string>> {
+  // This is a placeholder. Replace with actual implementation to fetch word meanings.
+  return words.reduce((acc, word) => {
+    acc[word] = "Placeholder meaning for " + word;
+    return acc;
+  }, {} as Record<string, string>);
+}

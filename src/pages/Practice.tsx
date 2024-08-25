@@ -3,16 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuthState } from "react-firebase-hooks/auth";
 import { useCollectionData } from "react-firebase-hooks/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
-import {
-  collection,
-  query,
-  where,
-  orderBy,
-  limit,
-  addDoc,
-  updateDoc,
-  doc,
-} from "firebase/firestore";
+import { collection, query, where, orderBy, limit } from "firebase/firestore";
 import { auth, firestore } from "../services/firebase"; // Adjust this import based on your Firebase setup
 import { GeneratedText } from "../types/Text";
 
@@ -23,6 +14,11 @@ const Practice: React.FC = () => {
   const [currentText, setCurrentText] = useState<GeneratedText | null>(null);
   const [selectedWords, setSelectedWords] = useState<string[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const functions = getFunctions();
+  const generatePracticeText = httpsCallable(functions, "generatePracticeText");
+  const processSelectedWords = httpsCallable(functions, "processSelectedWords");
 
   // Query for the most recent uncompleted generated text
   const generatedTextsQuery = query(
@@ -45,23 +41,9 @@ const Practice: React.FC = () => {
     if (!user) return;
 
     setIsGenerating(true);
-    const functions = getFunctions();
-    const generatePracticeText = httpsCallable<
-      {},
-      { generatedText: string; generatedTextId: string }
-    >(functions, "generatePracticeText");
-
     try {
       const result = await generatePracticeText();
-      const newText: GeneratedText = {
-        id: result.data.generatedTextId,
-        text: result.data.generatedText,
-        uid: user.uid,
-        createdAt: Date.now(),
-        completed: false,
-        unkown_words: [],
-        suggested_words: [],
-      };
+      const newText = result.data as GeneratedText;
       setCurrentText(newText);
     } catch (error) {
       console.error("Error generating practice text:", error);
@@ -80,26 +62,36 @@ const Practice: React.FC = () => {
   const handleSubmit = async () => {
     if (!currentText || !user) return;
 
+    setIsSubmitting(true);
     try {
-      await updateDoc(
-        doc(firestore, `accounts/${user.uid}/generatedText/${currentText.id}`),
-        {
-          completed: true,
-          unkown_words: selectedWords,
-        }
-      );
+      const result = await processSelectedWords({
+        selectedWords: selectedWords,
+        generatedTextId: currentText.id,
+      });
 
-      // Here you would typically call another cloud function to determine IELTS level
-      // and update the user's score. For now, we'll just navigate to results.
-      navigate("/results", { state: { selectedWords } });
+      const { newScore, unknownWords } = result.data as {
+        newScore: number;
+        unknownWords: Record<string, string>;
+      };
+
+      // Navigate to results page with the new data
+      navigate("/results", {
+        state: {
+          score: newScore,
+          unknownWords: unknownWords,
+          practiceText: currentText.text,
+        },
+      });
     } catch (error) {
-      console.error("Error submitting practice:", error);
-      // Handle error
+      console.error("Error processing selected words:", error);
+      // Handle error (show error message to user)
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  if (loading || generatedTextsLoading) return <div>Loading...</div>;
-  if (error) return <div>Error: {error.message}</div>;
+  if (loading || generatedTextsLoading) return <div>加载中...</div>;
+  if (error) return <div>错误: {error.message}</div>;
   if (!user) {
     navigate("/login");
     return null;
@@ -139,9 +131,10 @@ const Practice: React.FC = () => {
             </p>
             <button
               onClick={handleSubmit}
-              className="w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+              disabled={isSubmitting}
+              className="w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50"
             >
-              提交评分
+              {isSubmitting ? "提交中..." : "提交评分"}
             </button>
           </div>
         )}

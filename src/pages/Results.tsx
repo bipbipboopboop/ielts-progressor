@@ -1,46 +1,45 @@
-import React, { useState, useEffect } from "react";
+import React from "react";
 import { useNavigate } from "react-router-dom";
-import { fetchMockData } from "../services/mockData";
+import { useAuthState } from "react-firebase-hooks/auth";
+import { useCollectionData } from "react-firebase-hooks/firestore";
+import { collection, query, where, orderBy, limit } from "firebase/firestore";
+import { auth, firestore } from "../services/firebase";
 
 interface Word {
   word: string;
   meaning: string;
 }
 
-interface MockData {
+interface ResultsData {
+  id: string;
   score: number;
-  unknownWords: Word[];
-  suggestedWords: Word[];
+  unkown_words: string[];
+  suggested_words: Word[];
+  text: string;
+  completed: boolean;
 }
 
 const Results: React.FC = () => {
-  const [data, setData] = useState<MockData | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
+  const [user, userLoading, userError] = useAuthState(auth);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setIsLoading(true);
-        const result = (await fetchMockData()) as MockData;
-        setData(result);
-      } catch (err) {
-        setError("加载数据时出错。请稍后再试。");
-      } finally {
-        setIsLoading(false);
-      }
-    };
+  const resultsQuery = user
+    ? query(
+        collection(firestore, `accounts/${user.uid}/generatedText`),
+        where("completed", "==", true),
+        orderBy("createdAt", "desc"),
+        limit(1)
+      )
+    : null;
 
-    fetchData();
-  }, []);
+  const [resultsData, resultsLoading, resultsError] =
+    useCollectionData(resultsQuery);
 
   const handleTryAgain = () => {
     navigate("/practice");
   };
 
-  if (isLoading) {
+  if (userLoading || resultsLoading) {
     return (
       <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-purple-600 to-blue-500">
         <div className="text-white text-2xl">加载中...</div>
@@ -48,13 +47,22 @@ const Results: React.FC = () => {
     );
   }
 
-  if (error || !data) {
+  if (
+    userError ||
+    resultsError ||
+    !user ||
+    !resultsData ||
+    resultsData.length === 0
+  ) {
     return (
       <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-purple-600 to-blue-500">
-        <div className="text-white text-2xl">{error || "数据加载失败"}</div>
+        <div className="text-white text-2xl">加载数据时出错。请稍后再试。</div>
       </div>
     );
   }
+
+  const data = resultsData[0] as ResultsData;
+  console.log({ data });
 
   return (
     <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-purple-600 to-blue-500 p-4">
@@ -63,30 +71,33 @@ const Results: React.FC = () => {
           您的雅思成绩
         </h1>
         <div className="text-center mb-6">
-          <p className="text-6xl font-bold text-indigo-600">
-            {data.score.toFixed(1)}
-          </p>
+          <p className="text-6xl font-bold text-indigo-600">{data.score}</p>
         </div>
         <h2 className="text-xl font-semibold mb-4 text-gray-700">
           您不熟悉的单词：
         </h2>
         <ul className="mb-6 list-disc list-inside">
-          {data.unknownWords.map((word, index) => (
+          {data.unkown_words.map((word, index) => (
             <li key={index} className="text-gray-600 mb-2">
-              <span className="font-semibold">{word.word}</span>: {word.meaning}
+              <span className="font-semibold">{word}</span>
             </li>
           ))}
         </ul>
-        <h2 className="text-xl font-semibold mb-4 text-gray-700">
-          建议学习的单词：
-        </h2>
-        <ul className="mb-6 list-disc list-inside">
-          {data.suggestedWords.map((word, index) => (
-            <li key={index} className="text-gray-600 mb-2">
-              <span className="font-semibold">{word.word}</span>: {word.meaning}
-            </li>
-          ))}
-        </ul>
+        {data.suggested_words && data.suggested_words.length > 0 && (
+          <>
+            <h2 className="text-xl font-semibold mb-4 text-gray-700">
+              建议学习的单词：
+            </h2>
+            <ul className="mb-6 list-disc list-inside">
+              {data.suggested_words.map((word, index) => (
+                <li key={index} className="text-gray-600 mb-2">
+                  <span className="font-semibold">{word.word}</span>:{" "}
+                  {word.meaning}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
         <button
           onClick={handleTryAgain}
           className="w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"

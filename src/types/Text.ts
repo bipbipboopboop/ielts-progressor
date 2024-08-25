@@ -4,6 +4,7 @@ export interface GeneratedText {
   unkown_words: string[];
   suggested_words: string[];
   uid: string;
+  score: number;
   createdAt: number;
   completed: boolean;
 }
