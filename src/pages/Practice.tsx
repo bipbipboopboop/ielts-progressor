@@ -37,6 +37,8 @@ const Practice: React.FC = () => {
     }
   }, [generatedTexts]);
 
+  console.log({ generatedTexts });
+
   const handleStartPractice = async () => {
     if (!user) return;
 
@@ -93,7 +95,7 @@ const Practice: React.FC = () => {
   if (loading || generatedTextsLoading) return <div>加载中...</div>;
   if (error) return <div>错误: {error.message}</div>;
   if (!user) {
-    navigate("/login");
+    navigate("/");
     return null;
   }
 
@@ -114,7 +116,7 @@ const Practice: React.FC = () => {
         ) : (
           <div className="flex flex-col flex-grow">
             <div className="mb-4 p-4 border border-gray-300 rounded-md bg-gray-50 overflow-y-auto flex-grow">
-              {currentText.text.split(" ").map((word, index) => (
+              {currentText?.text?.split(" ").map((word, index) => (
                 <span
                   key={index}
                   onClick={() => handleWordClick(word)}
